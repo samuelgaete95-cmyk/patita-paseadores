@@ -1,0 +1,236 @@
+import flet as ft
+import requests
+
+# ==========================================
+# 1. CONFIGURACIÓN DE SUPABASE Y CLIMA GPS
+# ==========================================
+SUPABASE_URL = "https://oerhxswjwpestxcmncft.supabase.co"
+SUPABASE_KEY = "sb_publishable_p75QcrIUZn_vU30Jf6W1VA_wiknlpHD"
+
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
+
+def registrar_paseador_en_nube(nombre, zona, tarifa, instagram):
+    url = f"{SUPABASE_URL}/rest/v1/paseadores"
+    datos = {"nombre": nombre, "zona": zona, "tarifa": tarifa, "instagram": instagram}
+    try:
+        respuesta = requests.post(url, headers=HEADERS, json=datos)
+        return (True, "¡Paseador registrado con éxito!") if respuesta.status_code in [200, 201] else (False, f"Error: {respuesta.text}")
+    except Exception as e:
+        return False, f"Error de red: {e}"
+
+def obtener_paseadores():
+    url = f"{SUPABASE_URL}/rest/v1/paseadores?select=*"
+    try:
+        resp = requests.get(url, headers={**HEADERS, "Content-Type": None})
+        return resp.json() if resp.status_code == 200 else []
+    except:
+        return []
+
+def obtener_clima_por_geolocalizacion():
+    """Detecta la ubicación por IP y consulta el clima actual en tiempo real"""
+    try:
+        geo_resp = requests.get("https://ipapi.co/json/", timeout=3)
+        if geo_resp.status_code == 200:
+            geo_data = geo_resp.json()
+            lat = geo_data.get("latitude", -34.9858) # Curicó por defecto si falla
+            lon = geo_data.get("longitude", -71.2394)
+            ciudad = geo_data.get("city", "Curicó")
+            
+            weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m"
+            w_resp = requests.get(weather_url, timeout=3)
+            if w_resp.status_code == 200:
+                temp = w_resp.json()["current"]["temperature_2m"]
+                return temp, ciudad
+    except:
+        pass
+    
+    return 20.0, "Curicó"
+
+# ==========================================
+# 2. APLICACIÓN PRINCIPAL (FLET)
+# ==========================================
+def main(page: ft.Page):
+    page.title = "PATITA - Red de Paseadores"
+    page.theme_mode = ft.ThemeMode.DARK
+    page.bgcolor = "#121417"
+    page.padding = 20
+    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+
+    contenedor_principal = ft.Column(horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+
+    # --- VISTA 1: REGISTRO DE PASEADOR ---
+    def mostrar_registro(e=None):
+        txt_nombre = ft.TextField(label="Nombre Completo", hint_text="Ej: Samuel Gaete", border_color="#4392F1", color=ft.Colors.WHITE, prefix_icon=ft.Icons.PERSON)
+        txt_zona = ft.TextField(label="Zona o Sector de Paseo", hint_text="Ej: Curicó Centro, Pichingal", border_color="#4392F1", color=ft.Colors.WHITE, prefix_icon=ft.Icons.LOCATION_ON)
+        txt_tarifa = ft.TextField(label="Tarifa por hora ($)", hint_text="Ej: 3000", keyboard_type=ft.KeyboardType.NUMBER, border_color="#4392F1", color=ft.Colors.WHITE, prefix_icon=ft.Icons.ATTACH_MONEY)
+        txt_instagram = ft.TextField(label="Instagram o Teléfono", hint_text="Ej: @tiosam_paseos", border_color="#4392F1", color=ft.Colors.WHITE, prefix_icon=ft.Icons.CONTACT_PHONE)
+
+        lbl_resultado = ft.Text(value="", size=14, weight=ft.FontWeight.BOLD)
+
+        def procesar_registro(e):
+            if not txt_nombre.value or not txt_zona.value or not txt_tarifa.value:
+                lbl_resultado.value = "⚠️ Completa Nombre, Zona y Tarifa."
+                lbl_resultado.color = ft.Colors.AMBER_400
+                page.update()
+                return
+
+            try:
+                tarifa_num = float(txt_tarifa.value.replace(".", ""))
+            except ValueError:
+                lbl_resultado.value = "⚠️ Tarifa numérica inválida."
+                lbl_resultado.color = ft.Colors.AMBER_400
+                page.update()
+                return
+
+            exito, msj = registrar_paseador_en_nube(txt_nombre.value, txt_zona.value, tarifa_num, txt_instagram.value)
+            if exito:
+                lbl_resultado.value = "✅ " + msj
+                lbl_resultado.color = ft.Colors.GREEN_400
+                txt_nombre.value = txt_zona.value = txt_tarifa.value = txt_instagram.value = ""
+            else:
+                lbl_resultado.value = "❌ " + msj
+                lbl_resultado.color = ft.Colors.RED_400
+            page.update()
+
+        btn_registrar = ft.ElevatedButton(
+            text="REGISTRARME COMO PASEADOR",
+            on_click=procesar_registro,
+            style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor="#4392F1", padding=20, shape=ft.RoundedRectangleBorder(radius=12)),
+            width=340
+        )
+
+        btn_ir_catalogo = ft.OutlinedButton(
+            text="🐾 VER PASEADORES REGISTRADOS",
+            on_click=mostrar_catalogo,
+            style=ft.ButtonStyle(
+                color=ft.Colors.WHITE,
+                side=ft.BorderSide(1, "#4392F1"),
+                shape=ft.RoundedRectangleBorder(radius=12),
+                padding=15
+            ),
+            width=340
+        )
+
+        # CONSULTAR CLIMA CON DETECCIÓN DE UBICACIÓN
+        temp, ciudad = obtener_clima_por_geolocalizacion()
+        
+        if temp is not None:
+            if temp > 25:
+                color_estado = "#FF5252" # Alerta calor
+                titulo_estado = f"⚠️ ALERTA ASFALTO: {temp}°C"
+                sub_estado = f"Calor extremo en {ciudad} - ¡Cuidado!"
+                icono_estado = ft.Icons.WARNING
+            else:
+                color_estado = "#00E676" # Seguro
+                titulo_estado = f"🟢 PISO SEGURO: {temp}°C"
+                sub_estado = f"Temperatura óptima en {ciudad}"
+                icono_estado = ft.Icons.WB_SUNNY
+        else:
+            color_estado = "#00E676"
+            titulo_estado = "PISO SEGURO PARA HUELLITAS"
+            sub_estado = "Ubicación detectada"
+            icono_estado = ft.Icons.WB_SUNNY
+
+        card_formulario = ft.Container(
+            content=ft.Column(
+                controls=[
+                    # INDICADOR PISO SEGURO
+                    ft.Container(
+                        content=ft.Row(
+                            controls=[
+                                ft.Icon(icono_estado, color=color_estado, size=22),
+                                ft.Column([
+                                    ft.Text(titulo_estado, size=11, weight=ft.FontWeight.BOLD, color=color_estado),
+                                    ft.Text(sub_estado, size=10, color=ft.Colors.GREY_400),
+                                ], spacing=1)
+                            ],
+                            alignment=ft.MainAxisAlignment.CENTER
+                        ),
+                        bgcolor="#1E232A", padding=10, border_radius=10, margin=ft.margin.only(bottom=10)
+                    ),
+                    
+                    # GIF / IMAGEN DEL PERRITO CON SU NOMBRE EXACTO "perro.gif"
+                    ft.Container(
+                        content=ft.Image(src="perro.gif", width=110, height=110, fit=ft.ImageFit.CONTAIN),
+                        alignment=ft.alignment.center, margin=ft.margin.symmetric(vertical=2)
+                    ),
+                    ft.Container(
+                        content=ft.Image(src="patitas_titulo.png", width=220, height=50, fit=ft.ImageFit.CONTAIN),
+                        alignment=ft.alignment.center, margin=ft.margin.only(bottom=5)
+                    ),
+                    
+                    ft.Text("Únete a la red de paseadores de tu zona", size=13, color=ft.Colors.GREY_400, text_align=ft.TextAlign.CENTER),
+                    ft.Divider(color="#2B303A", height=15),
+                    
+                    txt_nombre, txt_zona, txt_tarifa, txt_instagram,
+                    ft.Container(height=5),
+                    btn_registrar,
+                    lbl_resultado,
+                    ft.Container(height=5),
+                    btn_ir_catalogo
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8
+            ),
+            width=380, padding=25, bgcolor="#181B20", border_radius=18, border=ft.border.all(1, "#2B303A")
+        )
+
+        contenedor_principal.controls.clear()
+        contenedor_principal.controls.append(card_formulario)
+        page.update()
+
+    # --- VISTA 2: CATÁLOGO DE PASEADORES ---
+    def mostrar_catalogo(e=None):
+        paseadores = obtener_paseadores()
+        
+        lista_tarjetas = ft.ListView(expand=1, spacing=10, padding=10, width=380, height=420)
+        
+        for p in paseadores:
+            lista_tarjetas.controls.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text(p.get("nombre", "Sin nombre"), size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                        ft.Text(f"📍 Zona: {p.get('zona', 'N/A')}", size=13, color=ft.Colors.GREY_400),
+                        ft.Text(f"💰 Tarifa: ${p.get('tarifa', 0)}", size=13, color="#00E676"),
+                        ft.Text(f"📞 Contacto: {p.get('instagram', 'N/A')}", size=13, color="#4392F1"),
+                    ], spacing=4),
+                    bgcolor="#181B20", padding=15, border_radius=12,
+                    border=ft.border.all(1, "#2B303A")
+                )
+            )
+
+        if not paseadores:
+            lista_tarjetas.controls.append(ft.Text("No hay paseadores registrados aún.", color=ft.Colors.GREY_400))
+
+        btn_volver = ft.ElevatedButton(
+            text="⬅️ Volver al Registro",
+            on_click=mostrar_registro,
+            style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor="#4392F1", shape=ft.RoundedRectangleBorder(radius=12)),
+            width=340
+        )
+
+        card_catalogo = ft.Container(
+            content=ft.Column([
+                ft.Text("🐾 PASEADORES DISPONIBLES", size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                ft.Container(height=5),
+                lista_tarjetas,
+                ft.Container(height=10),
+                btn_volver
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+            width=380, padding=25, bgcolor="#181B20", border_radius=18, border=ft.border.all(1, "#2B303A")
+        )
+
+        contenedor_principal.controls.clear()
+        contenedor_principal.controls.append(card_catalogo)
+        page.update()
+
+    # Cargar vista de registro al iniciar
+    mostrar_registro()
+    page.add(contenedor_principal)
+
+if __name__ == "__main__":
+    ft.app(target=main, assets_dir="assets")

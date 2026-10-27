@@ -1,0 +1,3 @@
+([('main',
+   '/Users/samuelgaetegaete/Desktop/programacion piante/dist/main',
+   'EXECUTABLE')],)
